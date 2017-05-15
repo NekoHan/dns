@@ -1,11 +1,11 @@
-import socket
+ï»¿import socket
 from pprint import *
 
-dns_dic = dict() # <ÓòÃû-ip>×Öµä
+dns_dic = dict() # <åŸŸå-ip>å­—å…¸
 
 def crt_dns_dic():
-    """½¨Á¢<ÓòÃû-ip>×Öµä"""
-    global dns_dic # <ÓòÃû-ip>×Öµä
+    """å»ºç«‹<åŸŸå-ip>å­—å…¸"""
+    global dns_dic # <åŸŸå-ip>å­—å…¸
     with open('dnsrelay.txt', 'r') as f:
         text = f.readlines()
         for line in text:
@@ -16,19 +16,20 @@ def crt_dns_dic():
 
 
 class Mes():
-    """±¨ÎÄ"""
+    """æŠ¥æ–‡"""
     def __init__(self, data):
-        self.data = data # ×Ö½Ú´®
-        self.data_array = bytearray(self.data) # ×Ö½ÚÊı×é
-        self.qr = self.get_qr() # QR£º0Îª²éÑ¯£¬1ÎªÏìÓ¦
+        self.data = data # å­—èŠ‚ä¸²
+        self.data_array = bytearray(self.data) # å­—èŠ‚æ•°ç»„
+        self.qr = self.get_qr() # QRï¼š0ä¸ºæŸ¥è¯¢ï¼Œ1ä¸ºå“åº”
         self.id = self.get_id() # ID
         self.domain = self.get_domain()
         self.name = self.get_name()
+        self.q_sec = self.get_q_sec()
 
-        # ²éÑ¯±¨
+        # æŸ¥è¯¢æŠ¥
         if self.qr == 0:
             pass
-        self.domain = self.get_domain() # ÓòÃû
+        self.domain = self.get_domain() # åŸŸå
         # self.ip = self.get_ip()
  
     def get_qr(self):
@@ -39,17 +40,20 @@ class Mes():
 
 
     def get_domain(self):
-        """»ñµÃÓòÃû"""
-        i = 12  # question section ´ÓµÚ13×Ö½Ú¿ªÊ¼
+        """è·å¾—åŸŸå"""
+        i = 12  # question section ä»ç¬¬13å­—èŠ‚å¼€å§‹
         domain = ''
         while self.data_array[i] != 0:
-            num = int(self.data_array[i])  # ×Ö·û¸öÊı
+            num = int(self.data_array[i])  # å­—ç¬¦ä¸ªæ•°
             for byte in self.data_array[i + 1: i + 1 + num]:
                 domain += chr(byte)
             i += num + 1
             domain += '.'
         domain = domain[0:-1]
         return domain
+
+    def get_q_sec(self):
+        return self.data[12:]
 
     def get_name(self):
         
@@ -59,26 +63,47 @@ class Mes():
             num = int(self.data_array[i])
             name += bytes(self.data[i: i + 1 + num])
             i += num +1
+        name += b'\x00' # ä»¥0ç»“æŸ
         return name
 
         
     def get_ans(self):
-        """·¢ËÍ»Ø¸´±¨ÎÄ"""
-        # Èô×ÖµäÖĞÓĞ¸ÃÓòÃû
+        """å‘é€å›å¤æŠ¥æ–‡"""
+        # è‹¥å­—å…¸ä¸­æœ‰è¯¥åŸŸå
         if self.domain in dns_dic:
-            send_back()
+            self.response()
+        else:
+            self.query()
+            pass
+
     
-    def send_back(self):
-        global s, addr
-        ip_parts = dns_dic[self.domain].split('.')
-        m_head = self.id + b'\x00' + b'\x00' + b'\x00\x00' + b'\x00\x01'+\
+    def response(self):
+        #é€šè¿‡æœ¬åœ°ç¼“å­˜è®°å½•å›å¤
+        global s_res, addr, s
+        #print("send:", self.domain, dns_dic[self.domain])
+        ip_parts = list(map(int, dns_dic[self.domain].split('.')))
+        m_head = self.id + b'\x85\x80' + b'\x00\x01' + b'\x00\x01'+\
                            b'\x00\x00' + b'\x00\x00'
         
         m_record = self.name + b'\x00\x01' + b'\x00\x01' + b'\x00\x02\xA3\x00' +\
                                b'\x00\x04' + bytes(ip_parts)
-        m_msg = m_head + m_record
-        s.sendto(m_msg, addr)
-        
+        m_msg = m_head + self.q_sec + m_record
+        #print(m_msg)
+        n = s.sendto(m_msg, addr)
+        #for i in m_msg:
+        #    print(bin(i))
+        print("å›å¤è¿”å›å€¼ï¼š", n)
+
+    def query(self):
+        global s_qry
+        print("æ‰§è¡ŒæŸ¥è¯¢")    
+        n = s_qry.sendto(self.data, ('10.3.9.5', 53))
+        print("sockname:", s_qry.getsockname())
+        print("æŸ¥è¯¢è¿”å›å€¼ï¼š", n)
+        print(('127.0.0.1', s_qry.getsockname()[1]))
+        s_qry.bind(('127.0.0.1', s_qry.getsockname()[1]))
+        qry_res_data, qry_res_addr = s_qry.recvfrom(1024)
+        print(qry_re_data)
 
         
         
@@ -88,15 +113,24 @@ if __name__ == '__main__':
     
     crt_dns_dic()
     #pprint(dns_dic)
-    addr = ('', 53)
+    local_addr = ('127.0.0.1', 53)
+    
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(addr)
+    s.bind(local_addr)
+    s_res = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s_qry = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     print('Waiting...')
     while True:
-        # ½ÓÊÕÒ»¸öÊı¾İ
-        data, addr = s.recvfrom(1024)  # ½ÓÊÕ±¨ÎÄ
-        mm = Mes(data)
-        mm.get_ans()
+        # æ¥æ”¶ä¸€ä¸ªæ•°æ®
+        data, addr = s.recvfrom(1024)  # æ¥æ”¶æŠ¥æ–‡
+        print(addr)
+        if addr[0] == '127.0.0.1':
+            mm = Mes(data)
+            print("QR", mm.qr, "ID", mm.id, "Domain", mm.domain)
+            mm.get_ans()
+        else:
+            print('!')
+            print(data)
         
 
 
