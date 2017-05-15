@@ -79,8 +79,7 @@ class Mes():
     
     def response(self):
         #通过本地缓存记录回复
-        global s_res, addr, s
-        #print("send:", self.domain, dns_dic[self.domain])
+        global s, addr
         ip_parts = list(map(int, dns_dic[self.domain].split('.')))
         m_head = self.id + b'\x85\x80' + b'\x00\x01' + b'\x00\x01'+\
                            b'\x00\x00' + b'\x00\x00'
@@ -88,22 +87,13 @@ class Mes():
         m_record = self.name + b'\x00\x01' + b'\x00\x01' + b'\x00\x02\xA3\x00' +\
                                b'\x00\x04' + bytes(ip_parts)
         m_msg = m_head + self.q_sec + m_record
-        #print(m_msg)
-        n = s.sendto(m_msg, addr)
-        #for i in m_msg:
-        #    print(bin(i))
-        print("回复返回值：", n)
+        s.sendto(m_msg, addr)
 
     def query(self):
-        global s_qry
-        print("执行查询")    
-        n = s_qry.sendto(self.data, ('10.3.9.5', 53))
-        print("sockname:", s_qry.getsockname())
-        print("查询返回值：", n)
-        print(('127.0.0.1', s_qry.getsockname()[1]))
-        s_qry.bind(('127.0.0.1', s_qry.getsockname()[1]))
-        qry_res_data, qry_res_addr = s_qry.recvfrom(1024)
-        print(qry_re_data)
+        global s, id_addr_dic, addr 
+        s.sendto(self.data, ('10.3.9.5', 53))
+        id_addr_dic[self.id] = addr
+
 
         
         
@@ -112,25 +102,27 @@ class Mes():
 if __name__ == '__main__':
     
     crt_dns_dic()
-    #pprint(dns_dic)
-    local_addr = ('127.0.0.1', 53)
-    
+    local_addr = ('', 53)
+    #socket.setdefaulttimeout(20)
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(local_addr)
-    s_res = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s_qry = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    id_addr_dic = {}
+
     print('Waiting...')
+ 
     while True:
-        # 接收一个数据
-        data, addr = s.recvfrom(1024)  # 接收报文
-        print(addr)
-        if addr[0] == '127.0.0.1':
-            mm = Mes(data)
-            print("QR", mm.qr, "ID", mm.id, "Domain", mm.domain)
-            mm.get_ans()
-        else:
-            print('!')
-            print(data)
-        
+        try:
+            # 接收一个数据
+            data, addr = s.recvfrom(1024)  # 接收报文
+            if addr[1] != 53: # 查询报
+                mm = Mes(data)
+                #print(mm.domain)
+                mm.get_ans()
+            else: # 响应报
+                id = data[0:2]
+                if id in id_addr_dic:
+                    s.sendto(data, id_addr_dic[id])
+        except ConnectionResetError:
+            print('--')        
 
 
