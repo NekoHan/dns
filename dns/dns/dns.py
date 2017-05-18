@@ -1,7 +1,6 @@
 ﻿import socket
 from pprint import *
 
-dns_dic = dict() # <域名-ip>字典
 
 def crt_dns_dic():
     """建立<域名-ip>字典"""
@@ -12,14 +11,28 @@ def crt_dns_dic():
             ip_domain = line.split()
             if len(ip_domain):
                 dns_dic[ip_domain[1]] = ip_domain[0]
+
+def id_gener():
+    """顺序生成ID"""
+    i = 0
+    j = 0
+    while True:
+        j = j + 1
+        if j >= 256:
+            j = j % 256
+            i = i + 1
+        if i >= 256:
+            i = i % 256
+        yield bytes([i,j])
             
 
 
 class Mes():
     """报文"""
-    def __init__(self, data):
+    def __init__(self, data, addr):
         self.data = data # 字节串
         self.data_array = bytearray(self.data) # 字节数组
+        self.addr = addr #请求客户端地址
         self.qr = self.get_qr() # QR：0为查询，1为响应
         self.id = self.get_id() # ID
         self.domain = self.get_domain()
@@ -79,7 +92,7 @@ class Mes():
     
     def response(self):
         #通过本地缓存记录回复
-        global s, addr
+        global s
         ip_parts = list(map(int, dns_dic[self.domain].split('.')))
         m_head = self.id + b'\x85\x80' + b'\x00\x01' + b'\x00\x01'+\
                            b'\x00\x00' + b'\x00\x00'
@@ -87,12 +100,16 @@ class Mes():
         m_record = self.name + b'\x00\x01' + b'\x00\x01' + b'\x00\x02\xA3\x00' +\
                                b'\x00\x04' + bytes(ip_parts)
         m_msg = m_head + self.q_sec + m_record
-        s.sendto(m_msg, addr)
+        s.sendto(m_msg, self.addr)
 
     def query(self):
-        global s, id_addr_dic, addr 
-        s.sendto(self.data, ('10.3.9.5', 53))
-        id_addr_dic[self.id] = addr
+        # 向权威服务器查询
+        global s, id_addr_dic, idg, id_map
+        q_id = next(idg)
+        query_data = q_id + self.data[2:]
+        id_map[q_id] = self.id
+        s.sendto(query_data, ('10.3.9.5', 53))
+        id_addr_dic[self.id] = self.addr
 
 
         
@@ -100,13 +117,15 @@ class Mes():
 
 
 if __name__ == '__main__':
-    
+    dns_dic = dict() # <域名-ip>字典
     crt_dns_dic()
     local_addr = ('', 53)
     #socket.setdefaulttimeout(20)
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind(local_addr)
     id_addr_dic = {}
+    id_map = {} # ID转换映射表
+    idg = id_gener() # ID生成器
 
     print('Waiting...')
  
@@ -115,14 +134,21 @@ if __name__ == '__main__':
             # 接收一个数据
             data, addr = s.recvfrom(1024)  # 接收报文
             if addr[1] != 53: # 查询报
-                mm = Mes(data)
+                mm = Mes(data, addr)
                 #print(mm.domain)
                 mm.get_ans()
             else: # 响应报
-                id = data[0:2]
-                if id in id_addr_dic:
-                    s.sendto(data, id_addr_dic[id])
+                q_id = data[0:2]
+                r_id = 0
+                if q_id in id_map:
+                    r_id = id_map[q_id]
+                    id_map.pop(q_id)
+                if r_id in id_addr_dic:                   
+                    res_data = r_id + data[2:]
+                    s.sendto(res_data, id_addr_dic[r_id])
+                    id_addr_dic.pop(r_id)
         except ConnectionResetError:
-            print('--')        
+            #print('CRE')
+            pass        
 
 
